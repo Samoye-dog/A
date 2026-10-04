@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebLLM 本地运行 NemoMix-Unleashed-12B</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; }
+        #chat { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        .message { margin: 5px 0; }
+        .user { color: blue; }
+        .assistant { color: green; }
+        #status { color: #888; margin-bottom: 10px; }
+        input[type="text"] { width: 70%; padding: 8px; }
+        button { padding: 8px 15px; }
+    </style>
+</head>
+<body>
+    <h1>在浏览器中运行 NemoMix-Unleashed-12B</h1>
+    <div id="status">正在初始化...</div>
+    <div id="chat"></div>
+    <input type="text" id="userInput" placeholder="输入你的问题..." disabled>
+    <button id="sendBtn" disabled>发送</button>
+
+    <script type="module">
+        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+        // 1. 定义自定义模型记录
+        const appConfig = {
+            model_list: [
+                {
+                    model: "https://huggingface.co/huggingkot/NemoMix-Unleashed-12B-q4f16_1-MLC",
+                    model_id: "NemoMix-Unleashed-12B-q4f16_1-MLC",
+                    model_lib: webllm.modelLibURLPrefix + webllm.modelVersion + "/NemoMix-Unleashed-12B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+                    vram_required_MB: 8000, // 根据实际情况调整
+                    low_resource_required: false,
+                }
+            ]
+        };
+
+        // 2. 获取 UI 元素
+        const chatDiv = document.getElementById('chat');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDiv = document.getElementById('status');
+
+        let engine;
+
+        // 3. 初始化引擎并加载模型
+        async function initEngine() {
+            try {
+                statusDiv.textContent = "正在创建引擎并下载模型（首次使用可能需要一些时间）...";
+                engine = await webllm.CreateMLCEngine(
+                    "NemoMix-Unleashed-12B-q4f16_1-MLC",
+                    {
+                        appConfig: appConfig,
+                        initProgressCallback: (progress) => {
+                            statusDiv.textContent = `加载进度: ${(progress.progress * 100).toFixed(1)}% - ${progress.text}`;
+                        }
+                    }
+                );
+                statusDiv.textContent = "模型加载完成，可以开始对话了！";
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+            } catch (error) {
+                statusDiv.textContent = `模型加载失败: ${error.message}`;
+                console.error(error);
+            }
+        }
+
+        // 4. 发送消息并接收回复
+        async function sendMessage() {
+            const userMessage = userInput.value.trim();
+            if (!userMessage || !engine) return;
+
+            addMessage('user', userMessage);
+            userInput.value = '';
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+
+            try {
+                const reply = await engine.chat.completions.create({
+                    messages: [{ role: 'user', content: userMessage }],
+                    stream: true,
+                });
+
+                let assistantReply = '';
+                const assistantDiv = document.createElement('div');
+                assistantDiv.className = 'message assistant';
+                chatDiv.appendChild(assistantDiv);
+
+                for await (const chunk of reply) {
+                    const delta = chunk.choices[0]?.delta?.content || '';
+                    assistantReply += delta;ml
+                    assistantDiv.textContent = `Assistant: ${assistantReply}`;
+                    chatDiv.scrollTop = chatDiv.scrollHeight;
+                }
+            } catch (error) {
+                addMessage('assistant', `错误: ${error.message}`);
+            } finally {
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.focus();
+            }
+        }
+
+        function addMessage(role, text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${role}`;
+            msgDiv.textContent = `${role === 'user' ? 'You' : 'Assistant'}: ${text}`;
+            chatDiv.appendChild(msgDiv);
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+        }
+
+        // 5. 绑定事件并启动
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        initEngine();
+    </script>
+</body>
+</html>
